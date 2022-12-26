@@ -34,12 +34,6 @@ gv_user_id = 'EDGE'
 gv_db_conn_info = {'dbServer': 'DEV'}
 
 gv_ini_file_name = 'config.ini'
-gv_email_send_yn = 'N'
-gv_email_userid = ''
-gv_email_passwd = ''
-gv_line_send_yn = 'N'
-gv_line_group_id = ''
-gv_line_access_token = ''
 
 # static 건별 입력 기준
 gv_write_interval = 120
@@ -90,44 +84,6 @@ class MysqlDBConn:
                     gv_db_conn_info['dbName'] = config_file[dbServer]['dbName']
         else:
             logger.warning('!! DB ini file not found!!')
-
-
-class TlsSMTPHandler(logging.handlers.SMTPHandler):
-    def emit(self, record):
-        """
-        Emit a record.
-
-        Format the record and send it to the specified addressees.
-        """
-        try:
-            import smtplib
-            try:
-                from email.utils import formatdate
-            except ImportError:
-                formatdate = self.date_time
-            port = self.mailport
-            if not port:
-                port = smtplib.SMTP_PORT
-            smtp = smtplib.SMTP(self.mailhost, port)
-            msg = "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\n\r\n%s" % (
-                self.fromaddr,
-                # string.join(self.toaddrs, ","),
-                self.toaddrs,
-                self.getSubject(record),
-                formatdate(), record)
-
-            if self.username:
-                smtp.ehlo()  # for tls add this line
-                smtp.starttls()  # for tls add this line
-                smtp.ehlo()  # for tls add this line
-                smtp.login(self.username, self.password)
-            # print('email msg : ', msg)
-            smtp.sendmail(self.fromaddr, self.toaddrs, msg)
-            smtp.quit()
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except:
-            self.handleError(record)
 
 
 class DataChangeHandler(QObject):
@@ -414,18 +370,12 @@ class EventHandler(QObject):
     event_fired = pyqtSignal(object)
     config_change_event_fired = pyqtSignal(object)
     write_event_log_fired = pyqtSignal(object)
-    email_stop_yn = 'N'
-    line_stop_yn = 'N'
 
     def __init__(self):
         super().__init__()
 
         self.conn = None
         self.connect_db()
-        self.read_config()
-
-        # if gv_line_send_yn == 'Y':
-        #     send_message.init_line_message()
 
     def connect_db(self):
         try:
@@ -464,9 +414,6 @@ class EventHandler(QObject):
             msg = ' refresh started : ' + event.Message.Text   # Condition refresh started
             e_logger.info(msg)
             self.write_event_log_fired.emit(msg)
-            # TODO delete comment
-            self.email_stop_yn = 'Y'
-            # self.line_stop_yn = 'Y'
 
             # Refresh 될 때 기존 event 중 active 인거 모두 inactive 로 바꿔준다
             self.clean_events()
@@ -475,8 +422,6 @@ class EventHandler(QObject):
             msg = ' refresh complete : ' + event.Message.Text   # Condition refresh completed
             e_logger.info(msg)
             self.write_event_log_fired.emit(msg)
-            self.email_stop_yn = 'N'
-            self.line_stop_yn = 'N'
 
         elif event.Severity == 100:
             msg = ' server event occurred : ' + event.Message.Text
@@ -680,21 +625,6 @@ class EventHandler(QObject):
 
                 self.event_fired.emit(event)
 
-                # email 발송 여부 확인후 발송처리
-                if gv_email_send_yn == 'Y' and self.email_stop_yn == 'N':
-                    # TODO addr, msg 보강
-                    subject = 'Alarm Occured'
-                    to_addr = ['tailer9999@gmail.com', 'tailer99@sk.com']
-                    msg = event.SourceName + ' Severity - ' + str(event.Severity) + ' , Message - ' + event.Message.Text
-                    self.send_email(subject, to_addr, msg)
-
-                # # line message 발송 여부 확인후 발송처리
-                # if gv_line_send_yn == 'Y' and self.line_stop_yn == 'N':
-                #     # TODO addr, msg 보강
-                #     to_id = gv_line_group_id
-                #     msg = event.SourceName + ' Severity - ' + str(event.Severity) + ' , Message - ' + event.Message.Text
-                #     send_message.send_line_message(to_id, msg)
-
             except Exception as e:
                 msg = 'EVENT DATA INSERT error occurred : ' + str(e)
                 e_logger.error(msg)
@@ -732,22 +662,6 @@ class EventHandler(QObject):
                 self.conn.commit()
 
                 self.event_fired.emit(event)
-
-                # email 발송 여부 확인후 발송처리
-                if gv_email_send_yn == 'Y' and self.email_stop_yn == 'N':
-                    # TODO addr, msg 보강
-                    subject = 'Alarm Occured'
-                    to_addr = ['tailer9999@gmail.com', 'tailer99@sk.com']
-                    msg = event.SourceName + ' Severity - ' + str(event.Severity) + ' , Message - ' + event.Message.Text
-                    self.send_email(subject, to_addr, msg)
-
-                # # line message 발송 여부 확인후 발송처리
-                # if gv_line_send_yn == 'Y' and self.line_stop_yn == 'N':
-                #     # TODO addr, msg 보강
-                #     to_id = gv_line_group_id
-                #     msg = event.SourceName + ' Severity - ' + str(
-                #         event.Severity) + ' , Message - ' + event.Message.Text
-                #     send_message.send_line_message(to_id, msg)
 
             except Exception as e:
                 msg = 'EVENT DATA UPDATE error occurred : ' + str(e)
@@ -790,35 +704,6 @@ class EventHandler(QObject):
                 msg = 'EVENT DATA FIND error occurred : ' + str(e)
                 e_logger.error(msg)
                 self.write_event_log_fired.emit(msg)
-
-    def read_config(self):
-        global gv_email_send_yn
-        global gv_email_userid
-        global gv_email_passwd
-        global gv_line_send_yn
-        global gv_line_group_id
-        global gv_line_access_token
-
-        config_file = configparser.ConfigParser()
-        if config_file.read(gv_ini_file_name, encoding='utf-8'):
-
-            if config_file.has_section('EMAIL'):
-                gv_email_send_yn = config_file['EMAIL']['email_send_yn']
-                gv_email_userid = config_file['EMAIL']['userId']
-                gv_email_passwd = config_file['EMAIL']['passWd']
-
-            if config_file.has_section('LINE'):
-                gv_line_send_yn = config_file['LINE']['line_send_yn']
-                gv_line_group_id = config_file['LINE']['groupId']
-                gv_line_access_token = config_file['LINE']['access_token']
-
-        else:
-            logger.warning('!! ini file not found!!')
-
-    def send_email(self, subject, to_addr, msg):
-        gmail_sender = TlsSMTPHandler(('smtp.gmail.com', 587), 'ppdm@ppdm.io', to_addr,
-                                      subject, (gv_email_userid, gv_email_passwd))
-        gmail_sender.emit(msg)
 
 
 class EventUI(object):
@@ -914,12 +799,6 @@ class EventUI(object):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-
-        # ### TODO DELETE mail test
-        # subject = 'Alarm Occured'
-        # to_addr = ['tailer9999@gmail.com']
-        # self.send_email(subject, to_addr, 'Mail Test')
-        # ###
 
         global logger
         logger = self.make_logger("main", "main")
@@ -1389,28 +1268,6 @@ class MainWindow(QMainWindow):
         self.actionCall.setToolTip(_translate("MainWindow", "Call Ua Method"))
         self.actionDark_Mode.setText(_translate("MainWindow", "Dark Mode"))
         self.actionDark_Mode.setStatusTip(_translate("MainWindow", "Enables Dark Mode Theme"))
-
-    # TODO DELETE mail test 용 주석 처리
-    # def read_config(self):
-    #     global gv_email_send_yn
-    #     global gv_email_userid
-    #     global gv_email_passwd
-    #
-    #     config_file = configparser.ConfigParser()
-    #     if config_file.read(gv_ini_file_name, encoding='utf-8'):
-    #
-    #         if config_file.has_section('EMAIL'):
-    #             gv_email_send_yn = config_file['EMAIL']['email_send_yn']
-    #             gv_email_userid = config_file['EMAIL']['userId']
-    #             gv_email_passwd = config_file['EMAIL']['passWd']
-    #     else:
-    #         logger.warning('!! ini file not found!!')
-    #
-    # def send_email(self, subject, to_addr, msg):
-    #     self.read_config()
-    #     gmail_sender = TlsSMTPHandler(('smtp.gmail.com', 587), 'ppdm@ppdm.io', to_addr,
-    #                                   subject, (gv_email_userid, gv_email_passwd))
-    #     gmail_sender.emit(msg)
 
     def connect_db(self):
 
@@ -2250,6 +2107,7 @@ class MainWindow(QMainWindow):
 @sync.syncfunc(aio_func=common.events.get_filter_from_event_type)
 def get_filter_from_event_type(eventtypes):
     pass
+
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
